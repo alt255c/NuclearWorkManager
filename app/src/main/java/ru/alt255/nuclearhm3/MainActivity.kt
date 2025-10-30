@@ -74,7 +74,8 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Received workInfos: ${workInfos.size}")
 
             val activeWork = workInfos
-                .filter { it.state != WorkInfo.State.CANCELLED }
+                .filter { it.state == WorkInfo.State.SUCCEEDED
+                }
                 .sortedByDescending { it.runAttemptCount }
 
             val latestWorkA = activeWork.find { it.tags.contains("worker_a") }
@@ -166,7 +167,8 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "Starting work chain")
 
         currentChainId?.let { previousChainId ->
-            workManager.cancelAllWorkByTag(previousChainId)
+            //workManager.cancelAllWorkByTag(previousChainId)
+            workManager.cancelAllWork()
         }
 
         currentChainId = "${CHAIN_TAG_PREFIX}${System.currentTimeMillis()}"
@@ -187,10 +189,12 @@ class MainActivity : AppCompatActivity() {
             .addTag("worker_c")
             .build()
 
-        workManager.beginWith(workA)
-            .then(workB)
-            .then(workC)
-            .enqueue()
+        workManager.beginUniqueWork("Aboba", ExistingWorkPolicy.REPLACE, workA).then(workB).then(workC).enqueue()
+
+//        workManager.beginWith(workA)
+//            .then(workB, )
+//            .then(workC)
+//            .enqueue()
 
         observeWorkChain(currentChainId!!)
 
@@ -199,11 +203,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun observeWorkChain(chainId: String) {
         workManager.getWorkInfosByTagLiveData(chainId).removeObservers(this)
+        //workManager.cancelAllWork()
 
         workManager.getWorkInfosByTagLiveData(chainId).observe(this) { workInfos ->
             Log.d(TAG, "Received workInfos for chain $chainId: ${workInfos.size}")
 
-            workInfos.forEach { info ->
+            workInfos.sortedBy { it.tags.joinToString() }.forEach { info ->
                 Log.d(TAG, "WorkInfo: id=${info.id}, state=${info.state}, tags=${info.tags}")
 
                 when {
@@ -212,6 +217,8 @@ class MainActivity : AppCompatActivity() {
                     info.tags.contains("worker_c") -> handleWorkerC(info)
                 }
             }
+
+            Log.i(TAG,"observe Stop")
         }
     }
 
