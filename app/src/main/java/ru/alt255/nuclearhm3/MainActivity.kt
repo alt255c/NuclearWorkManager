@@ -20,10 +20,11 @@ import ru.alt255.nuclearhm3.workers.WorkerC
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var workManager: WorkManager
+    private var currentChainId: String? = null
 
     companion object {
         private const val TAG = "WorkChain"
-        private const val CHAIN_TAG = "work_chain"
+        private const val CHAIN_TAG_PREFIX = "work_chain_"
     }
 
     private val requestPermissionLauncher = registerForActivityResult(
@@ -69,18 +70,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupWorkObserver() {
-        workManager.getWorkInfosByTagLiveData(CHAIN_TAG).observe(this) { workInfos ->
+        workManager.getWorkInfosByTagLiveData(TAG).observe(this) { workInfos ->
             Log.d(TAG, "Received workInfos: ${workInfos.size}")
 
-            workInfos.forEach { info ->
-                Log.d(TAG, "WorkInfo: id=${info.id}, state=${info.state}, tags=${info.tags}")
+            val activeWork = workInfos
+                .filter { it.state != WorkInfo.State.CANCELLED }
+                .sortedByDescending { it.runAttemptCount }
 
-                when {
-                    info.tags.contains("worker_a") -> handleWorkerA(info)
-                    info.tags.contains("worker_b") -> handleWorkerB(info)
-                    info.tags.contains("worker_c") -> handleWorkerC(info)
-                }
-            }
+            val latestWorkA = activeWork.find { it.tags.contains("worker_a") }
+            val latestWorkB = activeWork.find { it.tags.contains("worker_b") }
+            val latestWorkC = activeWork.find { it.tags.contains("worker_c") }
+
+            latestWorkA?.let { handleWorkerA(it) }
+            latestWorkB?.let { handleWorkerB(it) }
+            latestWorkC?.let { handleWorkerC(it) }
         }
     }
 
@@ -162,22 +165,25 @@ class MainActivity : AppCompatActivity() {
     private fun startWorkChain() {
         Log.d(TAG, "Starting work chain")
 
-        workManager.cancelAllWorkByTag(CHAIN_TAG)
+        currentChainId?.let { previousChainId ->
+            workManager.cancelAllWorkByTag(previousChainId)
+        }
 
+        currentChainId = "${CHAIN_TAG_PREFIX}${System.currentTimeMillis()}"
         resetUIForNewChain()
 
         val workA = OneTimeWorkRequestBuilder<WorkerA>()
-            .addTag(CHAIN_TAG)
+            .addTag(currentChainId!!)
             .addTag("worker_a")
             .build()
 
         val workB = OneTimeWorkRequestBuilder<WorkerB>()
-            .addTag(CHAIN_TAG)
+            .addTag(currentChainId!!)
             .addTag("worker_b")
             .build()
 
         val workC = OneTimeWorkRequestBuilder<WorkerC>()
-            .addTag(CHAIN_TAG)
+            .addTag(currentChainId!!)
             .addTag("worker_c")
             .build()
 
@@ -186,7 +192,27 @@ class MainActivity : AppCompatActivity() {
             .then(workC)
             .enqueue()
 
+        observeWorkChain(currentChainId!!)
+
         Log.d(TAG, "Work chain enqueued: workA=${workA.id}, workB=${workB.id}, workC=${workC.id}")
+    }
+
+    private fun observeWorkChain(chainId: String) {
+        workManager.getWorkInfosByTagLiveData(chainId).removeObservers(this)
+
+        workManager.getWorkInfosByTagLiveData(chainId).observe(this) { workInfos ->
+            Log.d(TAG, "Received workInfos for chain $chainId: ${workInfos.size}")
+
+            workInfos.forEach { info ->
+                Log.d(TAG, "WorkInfo: id=${info.id}, state=${info.state}, tags=${info.tags}")
+
+                when {
+                    info.tags.contains("worker_a") -> handleWorkerA(info)
+                    info.tags.contains("worker_b") -> handleWorkerB(info)
+                    info.tags.contains("worker_c") -> handleWorkerC(info)
+                }
+            }
+        }
     }
 
     private fun resetUIForNewChain() {
